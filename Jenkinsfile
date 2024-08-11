@@ -7,10 +7,18 @@ pipeline {
         ZAP_API_KEY = credentials('zap-api-key')
     }
 
+    options {
+        skipDefaultCheckout true
+    }
+    
     stages {
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
-                git branch: 'main', credentialsId: 'github-token', url: 'https://github.com/shivamxdev/juiceShop.git'
+                checkout([$class: 'GitSCM', 
+                          branches: [[name: '*/main']], 
+                          userRemoteConfigs: [[url: 'https://github.com/shivamxdev/juiceShop.git']], 
+                          shallow: true, 
+                          depth: 1])
             }
         }
 
