@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
-        GITHUB_TOKEN = credentials('github-token')
-        ZAP_API_KEY = credentials('zap-api-key')
+        DOCKER_CREDENTIALS = credentials('dckr')
+        GITHUB_TOKEN = credentials('token')
+        ZAP_API_KEY = credentials('zk')
     }
 
     options {
@@ -104,7 +104,9 @@ pipeline {
 
     post {
         always {
-            cleanWs()
+             node {
+                cleanWs()
+            }
         }
         success {
             echo 'Pipeline completed successfully.'
