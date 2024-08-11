@@ -1,184 +1,108 @@
 pipeline {
-    agent none
+    agent any
+
     environment {
-        ANGULAR_CLI_VERSION = '13'
+        DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
+        GITHUB_TOKEN = credentials('github-token')
+        ZAP_API_KEY = credentials('zap-api-key')
     }
+
     stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', credentialsId: 'github-token', url: 'https://github.com/shivamxdev/juiceShop.git'
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm ci'
+            }
+        }
+
         stage('Lint') {
-            agent { label 'linux' }
             steps {
-                git url: 'https://github.com/shivamxdev/juiceShop.git'
-                nodejs('NodeJS 18') {
-                    sh 'npm install -g @angular/cli@$ANGULAR_CLI_VERSION'
-                    sh '''
-                        npm install --ignore-scripts
-                        cd frontend
-                        npm install --ignore-scripts --legacy-peer-deps
-                    '''
-                    sh 'npm run lint'
-                    sh '''
-                        npm run lint:config -- -f ./config/7ms.yml &&
-                        npm run lint:config -- -f ./config/addo.yml &&
-                        npm run lint:config -- -f ./config/bodgeit.yml &&
-                        npm run lint:config -- -f ./config/ctf.yml &&
-                        npm run lint:config -- -f ./config/default.yml &&
-                        npm run lint:config -- -f ./config/fbctf.yml &&
-                        npm run lint:config -- -f ./config/juicebox.yml &&
-                        npm run lint:config -- -f ./config/mozilla.yml &&
-                        npm run lint:config -- -f ./config/oss.yml &&
-                        npm run lint:config -- -f ./config/quiet.yml &&
-                        npm run lint:config -- -f ./config/tutorial.yml &&
-                        npm run lint:config -- -f ./config/unsafe.yml
-                    '''
-                }
+                sh 'npm run lint'
             }
         }
-        stage('Coding Challenge RSN') {
-            agent { label 'windows' }
+
+        stage('Unit Tests') {
             steps {
-                git url: 'https://github.com/shivamxdev/juiceShop.git'
-                nodejs('NodeJS 18') {
-                    sh 'npm install -g @angular/cli@$ANGULAR_CLI_VERSION'
-                    sh 'npm install'
-                    sh 'npm run rsn'
-                }
+                sh 'npm test'
             }
         }
-        stage('Test') {
-            matrix {
-                axes {
-                    axis {
-                        name 'OS'
-                        values 'linux', 'windows', 'mac'
-                    }
-                    axis {
-                        name 'NODE_VERSION'
-                        values '16', '18', '20'
-                    }
-                }
-                stages {
-                    stage('Checkout') {
-                        agent { label "${OS}" }
-                        steps {
-                            git url: 'https://github.com/shivamxdev/juiceShop.git'
-                        }
-                    }
-                    stage('Install NodeJS and CLI tools') {
-                        agent { label "${OS}" }
-                        steps {
-                            nodejs("NodeJS ${NODE_VERSION}") {
-                                sh 'npm install -g @angular/cli@$ANGULAR_CLI_VERSION'
-                                sh 'npm install'
-                            }
-                        }
-                    }
-                    stage('Unit Tests') {
-                        agent { label "${OS}" }
-                        steps {
-                            script {
-                                retry(3) {
-                                    timeout(time: 15, unit: 'MINUTES') {
-                                        sh 'npm test'
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    stage('Upload Coverage') {
-                        when {
-                            allOf {
-                                expression { return env.BRANCH_NAME == 'master' }
-                                expression { return OS == 'linux' }
-                                expression { return NODE_VERSION == '16' }
-                            }
-                        }
-                        steps {
-                            archiveArtifacts artifacts: 'build/reports/coverage/**/*.info', allowEmptyArchive: true
-                        }
-                    }
-                }
-            }
-        }
-        stage('API Test') {
-            matrix {
-                axes {
-                    axis {
-                        name 'OS'
-                        values 'linux', 'windows', 'mac'
-                    }
-                    axis {
-                        name 'NODE_VERSION'
-                        values '16', '18', '20'
-                    }
-                }
-                stages {
-                    stage('Checkout') {
-                        agent { label "${OS}" }
-                        steps {
-                            git url: 'https://github.com/shivamxdev/juiceShop.git'
-                        }
-                    }
-                    stage('Install NodeJS and CLI tools') {
-                        agent { label "${OS}" }
-                        steps {
-                            nodejs("NodeJS ${NODE_VERSION}") {
-                                sh 'npm install -g @angular/cli@$ANGULAR_CLI_VERSION'
-                                sh 'npm install'
-                            }
-                        }
-                    }
-                    stage('Integration Tests') {
-                        agent { label "${OS}" }
-                        steps {
-                            script {
-                                retry(3) {
-                                    timeout(time: 5, unit: 'MINUTES') {
-                                        sh '''
-                                            if [ "$RUNNER_OS" == "Windows" ]; then
-                                            set NODE_ENV=test
-                                            else
-                                            export NODE_ENV=test
-                                            fi
-                                            npm run frisby
-                                        '''
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    stage('Upload Coverage') {
-                        when {
-                            allOf {
-                                expression { return env.BRANCH_NAME == 'master' }
-                                expression { return OS == 'linux' }
-                                expression { return NODE_VERSION == '16' }
-                            }
-                        }
-                        steps {
-                            archiveArtifacts artifacts: 'build/reports/coverage/**/*.info', allowEmptyArchive: true
-                        }
-                    }
-                }
-            }
-        }
-        stage('Coverage Report') {
-            agent { label 'linux' }
-            when {
-                allOf {
-                    expression { return env.BRANCH_NAME == 'master' }
-                }
-            }
+
+        stage('Build Docker Image') {
             steps {
-                git url: 'https://github.com/shivamxdev/juiceShop.git'
-                // Steps to download and publish coverage report
-                // Similar to what is in ci.yml file for this stage
+                script {
+                    docker.build("my-app:${env.BUILD_ID}")
+                }
             }
         }
-        // Add other stages based on ci.yml
+
+        stage('CodeQL Analysis') {
+            steps {
+                sh '''
+                git checkout main
+                git checkout -b codeql-analysis
+                codeql database create codeql-db
+                codeql database analyze codeql-db --format=sarif-latest --output=results.sarif
+                '''
+            }
+        }
+
+        stage('ZAP Scan') {
+            steps {
+                sh '''
+                export ZAP_PATH="/usr/share/zaproxy"
+                export ZAP_PORT=8090
+                sh ./start_zap.sh $ZAP_PATH $ZAP_PORT $ZAP_API_KEY
+                zap-cli status -t 120
+                zap-cli active-scan http://localhost
+                zap-cli report -o zap_report.html -f html
+                '''
+            }
+        }
+
+        stage('Rebase') {
+            steps {
+                sh '''
+                git fetch origin
+                git rebase origin/main
+                git push origin HEAD:main --force
+                '''
+            }
+        }
+
+        stage('Release') {
+            steps {
+                script {
+                    def version = sh(script: "npm version --no-git-tag-version patch", returnStdout: true).trim()
+                    git tag "v${version}"
+                    git push origin --tags
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                kubectl apply -f k8s/deployment.yaml
+                kubectl rollout status deployment/my-app
+                '''
+            }
+        }
     }
+
     post {
         always {
             cleanWs()
+        }
+        success {
+            echo 'Pipeline completed successfully.'
+        }
+        failure {
+            echo 'Pipeline failed.'
         }
     }
 }
