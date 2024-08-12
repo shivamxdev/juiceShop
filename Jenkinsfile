@@ -104,7 +104,7 @@ pipeline {
 
     post {
         always {
-            cleanWs()
+            deleteDir()
         }
         success {
             echo 'Pipeline completed successfully.'
